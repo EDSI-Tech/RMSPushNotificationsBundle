@@ -2,6 +2,7 @@
 
 namespace RMS\PushNotificationsBundle\Service\OS;
 
+use Psr\Log\LoggerInterface;
 use RMS\PushNotificationsBundle\Exception\InvalidMessageTypeException,
     RMS\PushNotificationsBundle\Message\AndroidMessage,
     RMS\PushNotificationsBundle\Message\MessageInterface;
@@ -12,6 +13,14 @@ use Buzz\Browser,
 
 class AndroidGCMNotification implements OSNotificationServiceInterface
 {
+
+    /**
+     * Whether or not to use the dry run GCM
+     *
+     * @var bool
+     */
+    protected $useDryRun = false;
+
     /**
      * GCM endpoint
      *
@@ -48,15 +57,25 @@ class AndroidGCMNotification implements OSNotificationServiceInterface
     protected $responses;
 
     /**
+     * Monolog logger
+     *
+     * @var LoggerInterface
+     */
+    protected $logger;
+
+    /**
      * Constructor
      *
-     * @param $apiKey
+     * @param string       $apiKey
      * @param bool         $useMultiCurl
      * @param int          $timeout
-     * @param AbstractCurl $client       (optional)
+     * @param LoggerInterface $logger
+     * @param AbstractCurl $client (optional)
+     * @param bool         $dryRun
      */
-    public function __construct($apiKey, $useMultiCurl, $timeout, AbstractCurl $client = null)
+    public function __construct($apiKey, $useMultiCurl, $timeout, $logger, AbstractCurl $client = null, $dryRun = false)
     {
+        $this->useDryRun = $dryRun;
         $this->apiKey = $apiKey;
         if (!$client) {
             $client = ($useMultiCurl ? new MultiCurl() : new Curl());
@@ -65,6 +84,7 @@ class AndroidGCMNotification implements OSNotificationServiceInterface
 
         $this->browser = new Browser($client);
         $this->browser->getClient()->setVerifyPeer(false);
+        $this->logger = $logger;
     }
 
     /**
@@ -92,14 +112,25 @@ class AndroidGCMNotification implements OSNotificationServiceInterface
             array("data" => $message->getData())
         );
 
-        // Chunk number of registration IDs according to the maximum allowed by GCM
-        $chunks = array_chunk($message->getGCMIdentifiers(), $this->registrationIdMaxCount);
+        if ($this->useDryRun) {
+            $data['dry_run'] = true;
+        }
 
         // Perform the calls (in parallel)
         $this->responses = array();
-        foreach ($chunks as $registrationIDs) {
-            $data["registration_ids"] = $registrationIDs;
+        $gcmIdentifiers = $message->getGCMIdentifiers();
+
+        if (count($message->getGCMIdentifiers()) == 1) {
+            $data['to'] = $gcmIdentifiers[0];
             $this->responses[] = $this->browser->post($this->apiURL, $headers, json_encode($data));
+        } else {
+            // Chunk number of registration IDs according to the maximum allowed by GCM
+            $chunks = array_chunk($message->getGCMIdentifiers(), $this->registrationIdMaxCount);
+
+            foreach ($chunks as $registrationIDs) {
+                $data['registration_ids'] = $registrationIDs;
+                $this->responses[] = $this->browser->post($this->apiURL, $headers, json_encode($data));
+            }
         }
 
         // If we're using multiple concurrent connections via MultiCurl
@@ -112,6 +143,15 @@ class AndroidGCMNotification implements OSNotificationServiceInterface
         foreach ($this->responses as $response) {
             $message = json_decode($response->getContent());
             if ($message === null || $message->success == 0 || $message->failure > 0) {
+                if ($message == null) {
+                    $this->logger->error($response->getContent());
+                } else {
+                    foreach ($message->results as $result) {
+                        if (isset($result->error)) {
+                            $this->logger->error($result->error);
+                        }
+                    }
+                }
                 return false;
             }
         }

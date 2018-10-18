@@ -2,6 +2,7 @@
 
 namespace RMS\PushNotificationsBundle\Service\OS;
 
+use Psr\Log\LoggerInterface;
 use RMS\PushNotificationsBundle\Exception\InvalidMessageTypeException;
 use RMS\PushNotificationsBundle\Message\WindowsphoneMessage;
 use RMS\PushNotificationsBundle\Message\MessageInterface;
@@ -18,13 +19,22 @@ class MicrosoftNotification implements OSNotificationServiceInterface
     protected $browser;
 
     /**
-     * @param $timeout
+     * Monolog logger
+     *
+     * @var LoggerInterface
      */
-    public function __construct($timeout)
+    protected $logger;
+
+    /**
+     * @param $timeout
+     * @param $logger
+     */
+    public function __construct($timeout, $logger)
     {
         $this->browser = new Browser(new Curl());
         $this->browser->getClient()->setVerifyPeer(false);
         $this->browser->getClient()->setTimeout($timeout);
+        $this->logger = $logger;
     }
 
     public function send(MessageInterface $message)
@@ -50,6 +60,10 @@ class MicrosoftNotification implements OSNotificationServiceInterface
         }
 
         $response = $this->browser->post($message->getDeviceIdentifier(), $headers, $xml->asXML());
+
+        if (!$response->isSuccessful()) {
+            $this->logger->error($response->getStatusCode(). ' : '. $response->getReasonPhrase());
+        }
 
         return $response->isSuccessful();
     }

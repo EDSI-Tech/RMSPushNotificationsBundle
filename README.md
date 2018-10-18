@@ -43,6 +43,7 @@ only be available if you provide configuration respectively for them.
           gcm:
               api_key: <string_android_gcm_api_key> # This is titled "Server Key" when creating it
               use_multi_curl: <boolean_android_gcm_use_multi_curl> # default is true
+              dry_run: <bool_use_gcm_dry_run>
       ios:
           timeout: 60 # Seconds to wait for connection timeout, default is 60
           sandbox: <bool_use_apns_sandbox>
@@ -110,6 +111,10 @@ This service is available within the bundle.  The following code demonstrates ho
 Here, `$uuids` contains an array of [Feedback](https://github.com/richsage/RMSPushNotificationsBundle/blob/master/Device/iOS/Feedback.php) objects, with timestamp, token length and the device UUID all populated.
 
 Apple recommend you poll this service daily.
+
+## Windows Phone - Toast support
+
+The bundle has beta support for Windows Phone, and supports the Toast notification. Use the `WindowsphoneMessage` message class to send accordingly.
 
 # Thanks
 

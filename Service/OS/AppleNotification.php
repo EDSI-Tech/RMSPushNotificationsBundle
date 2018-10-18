@@ -2,6 +2,7 @@
 
 namespace RMS\PushNotificationsBundle\Service\OS;
 
+use Psr\Log\LoggerInterface;
 use RMS\PushNotificationsBundle\Exception\InvalidMessageTypeException,
     RMS\PushNotificationsBundle\Message\AppleMessage,
     RMS\PushNotificationsBundle\Message\MessageInterface,
@@ -97,22 +98,35 @@ class AppleNotification implements OSNotificationServiceInterface, EventListener
     protected $cachedir;
 
     /**
+     * Monolog logger
+     *
+     * @var LoggerInterface
+     */
+    protected $logger;
+
+    /**
      * Cache pem filename
      */
     const APNS_CERTIFICATE_FILE = '/rms_push_notifications/apns.pem';
 
     /**
+     * Status code retrieve when APNS server closed the connection
+     */
+    const APNS_SHUTDOWN_CODE = 10;
+
+    /**
      * Constructor
      *
-     * @param $sandbox
-     * @param $pem
-     * @param string $passphrase
-     * @param bool $jsonUnescapedUnicode
-     * @param int $timeout
-     * @param string $cachedir
+     * @param bool          $sandbox
+     * @param string        $pem
+     * @param string        $passphrase
+     * @param bool          $jsonUnescapedUnicode
+     * @param int           $timeout
+     * @param string        $cachedir
      * @param EventListener $eventListener
+     * @param LoggerInterface $logger
      */
-    public function __construct($sandbox, $pem, $passphrase = "", $jsonUnescapedUnicode = FALSE, $timeout = 60, $cachedir = "", EventListener $eventListener = null)
+    public function __construct($sandbox, $pem, $passphrase = "", $jsonUnescapedUnicode = FALSE, $timeout = 60, $cachedir = "", EventListener $eventListener = null, $logger = null)
     {
         $this->useSandbox = $sandbox;
         $this->pemPath = $pem;
@@ -123,9 +137,11 @@ class AppleNotification implements OSNotificationServiceInterface, EventListener
         $this->jsonUnescapedUnicode = $jsonUnescapedUnicode;
         $this->timeout = $timeout;
         $this->cachedir = $cachedir;
+        $this->logger = $logger;
 
-        if ($eventListener != null)
+        if ($eventListener != null) {
             $eventListener->addListener($this);
+        }
     }
 
     /**
@@ -193,18 +209,26 @@ class AppleNotification implements OSNotificationServiceInterface, EventListener
     {
         $errors = array();
         // Loop through all messages starting from the given ID
-        for ($currentMessageId = $firstMessageId; $currentMessageId < count($this->messages); $currentMessageId++) {
+        $messagesCount = count($this->messages);
+        for ($currentMessageId = $firstMessageId; $currentMessageId < $messagesCount; $currentMessageId++) {
             // Send the message
             $result = $this->writeApnStream($apnURL, $this->messages[$currentMessageId]);
 
-            $errors = array();
-
             // Check if there is an error result
             if (is_array($result)) {
+
+                // Close the apn stream in case of Shutdown status code.
+                if ($result['status'] === self::APNS_SHUTDOWN_CODE) {
+                    $this->closeApnStream($apnURL);
+                }
+
                 $this->responses[] = $result;
                 // Resend all messages that were sent after the failed message
                 $this->sendMessages($result['identifier']+1, $apnURL);
                 $errors[] = $result;
+                if ($this->logger) {
+                    $this->logger->error(json_encode($result));
+                }
             } else {
                 $this->responses[] = true;
             }
@@ -396,26 +420,47 @@ class AppleNotification implements OSNotificationServiceInterface, EventListener
      * @param $passphrase
      */
     public function setPemAsString($pemContent, $passphrase) {
+        if ($this->pemContent === $pemContent && $this->pemContentPassphrase === $passphrase) {
+            return;
+        }
+
         $this->pemContent = $pemContent;
         $this->pemContentPassphrase = $passphrase;
+
+        // for new pem will take affect we need to close existing streams which use cached pem
+        $this->closeStreams();
     }
 
     /**
      * Called on kernel terminate
      */
-    public function onKernelTerminate() {
+    public function onKernelTerminate()
+    {
+        $this->removeCachedPemFile();
+        $this->closeStreams();
+    }
 
-        // Remove cache pem file
+    /**
+     * Remove cache pem file
+     */
+    private function removeCachedPemFile()
+    {
         $fs = new Filesystem();
         $filename = $this->cachedir . self::APNS_CERTIFICATE_FILE;
         if ($fs->exists(dirname($filename))) {
             $fs->remove(dirname($filename));
         }
+    }
 
-        // Close streams
+    /**
+     * Close existing streams
+     */
+    private function closeStreams()
+    {
         foreach ($this->apnStreams as $stream) {
             fclose($stream);
         }
 
+        $this->apnStreams = array();
     }
 }

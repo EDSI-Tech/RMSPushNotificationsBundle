@@ -14,8 +14,14 @@
     ],
     "require": {
         "php": ">=5.3.0",
-        "symfony/symfony": "2.*",
-        "kriswallsmith/buzz": "*"
+        "kriswallsmith/buzz": "*",
+        "psr/log": "^1.0"
+    },
+    "require-dev": {
+        "symfony/symfony": "^2.0 || ^3.0"
+    },
+    "suggest": {
+        "symfony/symfony": "To use as a bundle"
     },
     "autoload": {
         "psr-0": { "RMS\\PushNotificationsBundle": "" }
@@ -23,7 +29,7 @@
     "target-dir": "RMS/PushNotificationsBundle",
     "extra": {
         "branch-alias": {
-            "dev-master": "0.1.x-dev"
+            "dev-master": "0.2.x-dev"
         }
     }
 }
